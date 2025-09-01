@@ -14,8 +14,47 @@ export default function Home() {
   const [history, setHistory] = useState([]);
   const [isLoading, setIsLoading] = useState(false); // Add loading state
 
+  // New: mobile detection state
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    // detect mobile devices
+    if (typeof navigator !== "undefined") {
+      const mobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+        navigator.userAgent
+      );
+      setIsMobile(mobile);
+    }
+  }, []);
+
+  // New helper: open MetaMask mobile deep link (or fallback to download)
+  function openMetaMaskMobile() {
+    if (typeof window === "undefined") return;
+    const currentUrl = window.location.href;
+    // metamask.app.link expects host/path without protocol, use full path encoded if needed
+    // Many dapps use: https://metamask.app.link/dapp/<your-dapp-host-or-domain>
+    // Build a link that includes path (remove protocol)
+    const hostPath = currentUrl.replace(/^https?:\/\//, "");
+    const deepLink = `https://metamask.app.link/dapp/${hostPath}`;
+    // Try to open MetaMask app
+    window.location.href = deepLink;
+    // If MetaMask not installed, redirect to download after short delay
+    setTimeout(() => {
+      window.location.href = "https://metamask.io/download.html";
+    }, 1500);
+  }
+
   async function connectWallet() {
     try {
+      // If mobile and no injected provider, show mobile prompt instead of failing
+      if (isMobile && typeof window !== "undefined" && !window.ethereum) {
+        // Prefer showing UI to user (UI buttons are rendered). If user triggers connect, call openMetaMaskMobile.
+        // For automatic behavior (optional), uncomment the next line to auto-redirect:
+        // openMetaMaskMobile();
+        alert("No in-browser wallet detected. Use the 'Open in MetaMask App' button to authorize in MetaMask mobile.");
+        return;
+      }
+
       if (!window.ethereum) {
         alert("Please install MetaMask");
         return;
@@ -26,15 +65,15 @@ export default function Home() {
       });
 
       // Check network - convert both chain IDs to lowercase hex for comparison
-      const chainIdHex = await window.ethereum.request({ method: 'eth_chainId' });
-      const expectedChainIdHex = chainId.startsWith('0x')
+      const chainIdHex = await window.ethereum.request({ method: "eth_chainId" });
+      const expectedChainIdHex = chainId.startsWith("0x")
         ? chainId.toLowerCase()
         : `0x${parseInt(chainId).toString(16)}`;
 
       if (chainIdHex.toLowerCase() !== expectedChainIdHex.toLowerCase()) {
         try {
           await window.ethereum.request({
-            method: 'wallet_switchEthereumChain',
+            method: "wallet_switchEthereumChain",
             params: [{ chainId: expectedChainIdHex }],
           });
         } catch (switchError) {
@@ -82,7 +121,7 @@ export default function Home() {
 
           // Add small delay between requests
           if (allLogs.length > 0) {
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise((resolve) => setTimeout(resolve, 500));
           }
 
           const logs = await contract.queryFilter(filter, startBlock, endBlock);
@@ -102,7 +141,7 @@ export default function Home() {
           }
 
           // Wait longer between retries
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       }
 
@@ -134,8 +173,8 @@ export default function Home() {
         return;
       }
 
-      const chainIdHex = await window.ethereum.request({ method: 'eth_chainId' });
-      const expectedChainIdHex = chainId.startsWith('0x')
+      const chainIdHex = await window.ethereum.request({ method: "eth_chainId" });
+      const expectedChainIdHex = chainId.startsWith("0x")
         ? chainId.toLowerCase()
         : `0x${parseInt(chainId).toString(16)}`;
 
@@ -170,16 +209,60 @@ export default function Home() {
   return (
     <main className="p-4 md:p-8 font-sans">
       <h1 className="text-2xl font-bold mb-4">Hello Blockchain (Next.js)</h1>
+
+      {/* When no account: show desktop Connect button OR mobile options if mobile and no injected wallet */}
       {!account ? (
-        <button onClick={connectWallet} className="w-full md:w-auto px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
-          Connect Wallet
-        </button>
+        <>
+          {isMobile && typeof window !== "undefined" && !window.ethereum ? (
+            <div className="space-y-2">
+              <p className="text-sm text-gray-300 mb-2">
+                No in-browser wallet detected on mobile. Choose an option to authorize:
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={openMetaMaskMobile}
+                  className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                >
+                  Open in MetaMask App
+                </button>
+                <a
+                  href="https://metamask.io/download.html"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-600 inline-flex items-center"
+                >
+                  Install MetaMask
+                </a>
+                <a
+                  href="https://walletconnect.com/scan"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-500 inline-flex items-center"
+                >
+                  WalletConnect (manual)
+                </a>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                Tip: If you use MetaMask mobile, tap the button above to open this dApp inside MetaMask and authorize.
+              </p>
+            </div>
+          ) : (
+            <button
+              onClick={connectWallet}
+              className="w-full md:w-auto px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+            >
+              Connect Wallet
+            </button>
+          )}
+        </>
       ) : (
         <p className="break-all">Connected as: {account}</p>
       )}
 
       <div className="mt-4 space-y-4 md:space-y-0">
-        <p><strong>Stored Message:</strong> {message}</p>
+        <p>
+          <strong>Stored Message:</strong> {message}
+        </p>
         <div className="flex flex-col md:flex-row gap-2">
           <input
             value={newMessage}
@@ -187,7 +270,10 @@ export default function Home() {
             placeholder="Enter new message"
             className="px-3 py-2 border rounded flex-grow"
           />
-          <button onClick={writeMessage} className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+          <button
+            onClick={writeMessage}
+            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+          >
             Set Message
           </button>
         </div>
@@ -197,9 +283,7 @@ export default function Home() {
         <div className="mt-8">
           <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
             Message History
-            {isLoading && (
-              <span className="text-sm text-gray-500">(Loading...)</span>
-            )}
+            {isLoading && <span className="text-sm text-gray-500">(Loading...)</span>}
           </h2>
           {/* Add this message if needed */}
           {history.length === 1 && (
