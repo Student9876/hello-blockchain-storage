@@ -15,14 +15,39 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false); // Add loading state
 
   async function connectWallet() {
-    if (!window.ethereum) {
-      alert("Please install MetaMask");
-      return;
+    try {
+      if (!window.ethereum) {
+        alert("Please install MetaMask");
+        return;
+      }
+
+      const [selectedAccount] = await window.ethereum.request({
+        method: "eth_requestAccounts",
+      });
+
+      // Check network - convert both chain IDs to lowercase hex for comparison
+      const chainIdHex = await window.ethereum.request({ method: 'eth_chainId' });
+      const expectedChainIdHex = chainId.startsWith('0x')
+        ? chainId.toLowerCase()
+        : `0x${parseInt(chainId).toString(16)}`;
+
+      if (chainIdHex.toLowerCase() !== expectedChainIdHex.toLowerCase()) {
+        try {
+          await window.ethereum.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: expectedChainIdHex }],
+          });
+        } catch (switchError) {
+          alert(`Please switch to the correct network (Chain ID: ${expectedChainIdHex})`);
+          return;
+        }
+      }
+
+      setAccount(selectedAccount);
+    } catch (error) {
+      console.error("Error connecting wallet:", error);
+      alert("Error connecting wallet. Please try again.");
     }
-    const [selectedAccount] = await window.ethereum.request({
-      method: "eth_requestAccounts",
-    });
-    setAccount(selectedAccount);
   }
 
   async function getProvider() {
@@ -103,12 +128,39 @@ export default function Home() {
   }
 
   async function writeMessage() {
-    const provider = await getProvider();
-    const signer = await provider.getSigner();
-    const contract = new ethers.Contract(contractAddress, HelloStorage.abi, signer);
-    const tx = await contract.setMessage(newMessage);
-    await tx.wait();
-    readMessage();
+    try {
+      if (!window.ethereum) {
+        alert("Please install MetaMask");
+        return;
+      }
+
+      const chainIdHex = await window.ethereum.request({ method: 'eth_chainId' });
+      const expectedChainIdHex = chainId.startsWith('0x')
+        ? chainId.toLowerCase()
+        : `0x${parseInt(chainId).toString(16)}`;
+
+      if (chainIdHex.toLowerCase() !== expectedChainIdHex.toLowerCase()) {
+        alert(`Please switch to the correct network (Chain ID: ${expectedChainIdHex})`);
+        return;
+      }
+
+      // Get Web3Provider and signer from MetaMask
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+
+      const contract = new ethers.Contract(contractAddress, HelloStorage.abi, signer);
+      const tx = await contract.setMessage(newMessage);
+
+      // Wait for transaction confirmation
+      await tx.wait();
+
+      // Clear input and refresh message
+      setNewMessage("");
+      await readMessage();
+    } catch (error) {
+      console.error("Error writing message:", error);
+      alert("Error setting message. Please try again.");
+    }
   }
 
   useEffect(() => {
