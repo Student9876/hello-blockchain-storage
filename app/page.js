@@ -12,6 +12,7 @@ export default function Home() {
   const [message, setMessage] = useState("");
   const [newMessage, setNewMessage] = useState("");
   const [history, setHistory] = useState([]);
+  const [isLoading, setIsLoading] = useState(false); // Add loading state
 
   async function connectWallet() {
     if (!window.ethereum) {
@@ -25,36 +26,81 @@ export default function Home() {
   }
 
   async function getProvider() {
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    await provider.send("wallet_switchEthereumChain", [{ chainId }]); // using env variable
+    const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL;
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
     return provider;
   }
 
   async function readMessage() {
+    setIsLoading(true);
     const provider = await getProvider();
     const contract = new ethers.Contract(contractAddress, HelloStorage.abi, provider);
-    const currentMessage = await contract.message();
-    setMessage(currentMessage);
 
     try {
+      // Get current message
+      const currentMessage = await contract.message();
+      setMessage(currentMessage);
+
+      // Get logs with proper pagination
       const filter = contract.filters.MessageUpdated();
-      const logs = await contract.queryFilter(filter, deploymentBlock, "latest");
-      const parsed = logs.map((log) => {
-        const { sender, oldMessage, newMessage, timestamp } = log.args;
-        return {
-          sender,
-          oldMessage,
-          newMessage,
-          timestamp: new Date(Number(timestamp) * 1000).toLocaleString(),
+      const currentBlock = await provider.getBlockNumber();
+      const BLOCK_RANGE = 450; // Using slightly smaller range to be safe
+      let startBlock = deploymentBlock;
+      let allLogs = [];
+      let retryCount = 0;
+      const MAX_RETRIES = 3;
+
+      while (startBlock < currentBlock && retryCount < MAX_RETRIES) {
+        try {
+          // Calculate end block
+          let endBlock = Math.min(startBlock + BLOCK_RANGE, currentBlock);
+
+          // Add small delay between requests
+          if (allLogs.length > 0) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+
+          const logs = await contract.queryFilter(filter, startBlock, endBlock);
+          allLogs = [...allLogs, ...logs];
+
+          // Only move forward if request was successful
+          startBlock = endBlock + 1;
+          retryCount = 0; // Reset retry count on success
+        } catch (error) {
+          console.warn(`Retrying block range... Attempt ${retryCount + 1}`);
+          retryCount++;
+
+          // If we've hit max retries, break the loop
+          if (retryCount >= MAX_RETRIES) {
+            console.error("Max retries reached, showing partial results");
+            break;
+          }
+
+          // Wait longer between retries
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+
+      // Process and display logs even if we didn't get all of them
+      if (allLogs.length > 0) {
+        const parsed = allLogs.map((log) => ({
+          sender: log.args.sender,
+          oldMessage: log.args.oldMessage,
+          newMessage: log.args.newMessage,
+          timestamp: new Date(Number(log.args.timestamp) * 1000).toLocaleString(),
           txHash: log.transactionHash,
-        };
-      });
-      setHistory(parsed.reverse());
+        }));
+        setHistory(parsed.reverse());
+      } else {
+        setHistory([]);
+      }
     } catch (err) {
       console.error("Error fetching logs:", err);
+      alert("Error loading transaction history. Please try again later.");
+    } finally {
+      setIsLoading(false);
     }
   }
-
 
   async function writeMessage() {
     const provider = await getProvider();
@@ -97,7 +143,18 @@ export default function Home() {
 
       {history.length > 0 && (
         <div className="mt-8">
-          <h2 className="text-xl font-semibold mb-4">Message History</h2>
+          <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+            Message History
+            {isLoading && (
+              <span className="text-sm text-gray-500">(Loading...)</span>
+            )}
+          </h2>
+          {/* Add this message if needed */}
+          {history.length === 1 && (
+            <p className="text-sm text-yellow-500 mb-4">
+              Note: Only showing most recent transaction. Previous transactions may be available.
+            </p>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full border-collapse min-w-[640px]">
               <thead>
